@@ -73,26 +73,27 @@ clean(AppInfo, State) ->
     DepsDir = rebar_dir:deps_dir(State),
     AppOutDir = rebar_app_info:out_dir(AppInfo),
     Opts = rebar_app_info:opts(AppInfo),
-    {ok, GpbOpts} = dict:find(gpb_opts, Opts),
-    TargetErlDir = filename:join([AppOutDir,
-                                  proplists:get_value(o_erl, GpbOpts,
-                                                      ?DEFAULT_OUT_ERL_DIR)]),
-    TargetHrlDir = filename:join([AppOutDir,
-                                  proplists:get_value(o_hrl, GpbOpts,
-                                                      ?DEFAULT_OUT_HRL_DIR)]),
+    {ok, GpbOpts0} = dict:find(gpb_opts, Opts),
+    GpbOpts = lists:foldl(fun({K, _} = O, A) ->
+                              case proplists:is_defined(K, A) of
+                                  true -> A;
+                                  _false -> [O|A]
+                              end
+                          end,
+                          GpbOpts0,
+                          [{o_erl, ?DEFAULT_OUT_ERL_DIR}, {o_hrl, ?DEFAULT_OUT_HRL_DIR}]),
     ProtoFiles = find_proto_files(AppDir, DepsDir, GpbOpts),
     rebar_api:debug("found proto files: ~p", [ProtoFiles]),
-    GeneratedRootFiles =
-        lists:usort(
-          [filename:rootname(get_target(ProtoFile, GpbOpts))
-           || ProtoFile <- ProtoFiles]),
-    GeneratedErlFiles = [filename:join([TargetErlDir, F ++ ".erl"]) ||
-                            F <- GeneratedRootFiles],
-    GeneratedHrlFiles = [filename:join([TargetHrlDir, F ++ ".hrl"]) ||
-                            F <- GeneratedRootFiles],
-    rebar_api:debug("deleting [~p, ~p]",
-                    [GeneratedErlFiles, GeneratedHrlFiles]),
-    rebar_file_utils:delete_each(GeneratedErlFiles ++ GeneratedHrlFiles).
+    GeneratedFiles = lists:flatmap(fun(ProtoFile) ->
+                                       InputsOutputs = gpb_compile:list_io(ProtoFile, GpbOpts),
+                                       lists:map(fun(K) ->
+                                                     filename:join(AppOutDir, proplists:get_value(K, InputsOutputs))
+                                                 end,
+                                                 [erl_output, hrl_output])
+                                   end,
+                                   ProtoFiles),
+    rebar_api:debug("deleting ~p", [GeneratedFiles]),
+    rebar_file_utils:delete_each(GeneratedFiles).
 
 %% ===================================================================
 %% Private API
